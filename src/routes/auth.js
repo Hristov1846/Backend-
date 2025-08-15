@@ -15,9 +15,7 @@ router.post('/register', async (req, res) => {
     }
 
     const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists) {
-      return res.status(409).json({ ok: false, message: 'Email is already registered' });
-    }
+    if (exists) return res.status(409).json({ ok: false, message: 'Email already registered' });
 
     const birthDate = new Date(Number(year), Number(month) - 1, Number(day));
     if (isNaN(birthDate.getTime())) {
@@ -27,9 +25,7 @@ router.post('/register', async (req, res) => {
     const passwordHash = await bcrypt.hash(password, 10);
     const user = await User.create({ name, email: email.toLowerCase(), passwordHash, birthDate });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, {
-      expiresIn: '7d'
-    });
+    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.status(201).json({
       ok: true,
@@ -54,9 +50,7 @@ router.post('/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.passwordHash);
     if (!match) return res.status(401).json({ ok: false, message: 'Invalid credentials' });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, {
-      expiresIn: '7d'
-    });
+    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       ok: true,
@@ -69,7 +63,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// GET /auth/me (protected)
+// GET /auth/me
 router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.id).select('_id name email createdAt');
   if (!user) return res.status(404).json({ ok: false, message: 'User not found' });
