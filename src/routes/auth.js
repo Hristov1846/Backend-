@@ -1,73 +1,74 @@
-import { Router } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import User from '../models/User.js';
-import { requireAuth } from '../middleware/auth.js';
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { registerValidator, loginValidator } = require('../utils/validators');
 
-const router = Router();
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const JWT_EXPIRES_IN = '7d';
 
-// POST /auth/register
-router.post('/register', async (req, res) => {
+// POST /api/auth/register
+router.post('/register', registerValidator, async (req, res, next) => {
   try {
-    const { name, email, password, day, month, year } = req.body || {};
-    if (!name || !email || !password || !day || !month || !year) {
-      return res.status(400).json({ ok: false, message: 'Missing fields' });
-    }
+    const { name, email, password, birthDate, termsAccepted } = req.body;
 
-    const exists = await User.findOne({ email: email.toLowerCase() });
-    if (exists) return res.status(409).json({ ok: false, message: 'Email already registered' });
+    const exists = await User.findOne({ email });
+    if (exists) return res.status(409).json({ error: 'Email is already registered' });
 
-    const birthDate = new Date(Number(year), Number(month) - 1, Number(day));
-    if (isNaN(birthDate.getTime())) {
-      return res.status(400).json({ ok: false, message: 'Invalid birth date' });
-    }
+    const passwordHash = await bcrypt.hash(password, 12);
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const user = await User.create({ name, email: email.toLowerCase(), passwordHash, birthDate });
+    const user = await User.create({
+      name,
+      email,
+      passwordHash,
+      birthDate: new Date(birthDate),
+      termsAccepted
+    });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ uid: user._id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.status(201).json({
-      ok: true,
-      user: { id: user._id, name: user.name, email: user.email },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        birthDate: user.birthDate,
+        createdAt: user.createdAt
+      },
       token
     });
-  } catch (e) {
-    console.error('Register error:', e);
-    res.status(500).json({ ok: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 });
 
-// POST /auth/login
-router.post('/login', async (req, res) => {
+// POST /api/auth/login
+router.post('/login', loginValidator, async (req, res, next) => {
   try {
-    const { email, password } = req.body || {};
-    if (!email || !password) return res.status(400).json({ ok: false, message: 'Missing fields' });
+    const { email, password } = req.body;
 
-    const user = await User.findOne({ email: email.toLowerCase() });
-    if (!user) return res.status(401).json({ ok: false, message: 'Invalid credentials' });
+    const user = await User.findOne({ email });
+    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
 
-    const match = await bcrypt.compare(password, user.passwordHash);
-    if (!match) return res.status(401).json({ ok: false, message: 'Invalid credentials' });
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
 
-    const token = jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ uid: user._id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.json({
-      ok: true,
-      user: { id: user._id, name: user.name, email: user.email },
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        birthDate: user.birthDate,
+        createdAt: user.createdAt
+      },
       token
     });
-  } catch (e) {
-    console.error('Login error:', e);
-    res.status(500).json({ ok: false, message: 'Server error' });
+  } catch (err) {
+    next(err);
   }
 });
 
-// GET /auth/me
-router.get('/me', requireAuth, async (req, res) => {
-  const user = await User.findById(req.user.id).select('_id name email createdAt');
-  if (!user) return res.status(404).json({ ok: false, message: 'User not found' });
-  res.json({ ok: true, user });
-});
-
-export default router;
+module.exports = router;
