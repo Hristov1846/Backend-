@@ -1,5 +1,19 @@
 // server.js  — CommonJS (require), готов за Render
+const cors = require('cors');
 
+app.use(cors({
+  origin: [
+    'https://youvibe.netlify.app',
+    'http://localhost:5173'
+  ],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization'],
+  credentials: true,
+  optionsSuccessStatus: 204
+}));
+
+app.options('*', cors());
+app.use(express.json({ limit: '1mb' }));
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
