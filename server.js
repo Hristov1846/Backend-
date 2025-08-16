@@ -1,96 +1,63 @@
-// server.js – Backend за YouVibe
+// server.js — чист Express + Mongoose (без deprecated опции)
+const express = require('express');
+const cors = require('cors');
+const morgan = require('morgan');
+const mongoose = require('mongoose');
 
-const express = require("express");
-const cors = require("cors");
-const mongoose = require("mongoose");
-const bcrypt = require("bcryptjs");
-const jwt = require("jsonwebtoken");
-
-const app = express();
-
-// Middleware
-app.use(cors());
-app.use(express.json());
+const authRoutes = require('./routes/auth');
 
 // ---- ENV ----
 const PORT = process.env.PORT || 10000;
+// Пример: mongodb+srv://Youvibe_admin:<парола>@youvibe.kkcq2sr.mongodb.net/?retryWrites=true&w=majority&appName=Youvibe
 const MONGODB_URI = process.env.MONGODB_URI;
+const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
-// Свързване с MongoDB
-mongoose
-  .connect(MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
+if (!MONGODB_URI) {
+  console.error('❌ MONGODB_URI is not set!');
+  process.exit(1);
+}
+
+// ---- APP ----
+const app = express();
+
+// CORS
+app.use(
+  cors({
+    origin: CORS_ORIGIN === '*' ? true : CORS_ORIGIN.split(','),
+    credentials: false
   })
-  .then(() => console.log("✅ Connected to MongoDB"))
-  .catch((err) => console.error("❌ MongoDB connection error:", err));
+);
 
-// Модел за потребители
-const UserSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
-  birthDate: String,
+// Body parsers
+app.use(express.json({ limit: '1mb' }));
+app.use(morgan('tiny'));
+
+// Health endpoints (за Render health check)
+app.get('/', (req, res) => res.send('YouVibe API is up.'));
+app.get('/health', (req, res) => res.status(200).json({ ok: true }));
+
+// API routes
+app.use('/api/auth', authRoutes);
+
+// 404 fallback
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
 });
-const User = mongoose.model("User", UserSchema);
 
-// Health check за Render
-app.get("/health", (req, res) => {
-  res.status(200).send("OK");
-});
-
-// Регистрация
-app.post("/register", async (req, res) => {
+// ---- DB + START ----
+async function start() {
   try {
-    const { name, email, password, birthDate } = req.body;
+    // В Mongoose 8 не трябват useNewUrlParser/useUnifiedTopology
+    await mongoose.connect(MONGODB_URI);
+    console.log('✅ MongoDB connected');
 
-    if (!name || !email || !password || !birthDate) {
-      return res.status(400).json({ error: "Всички полета са задължителни" });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({
-      name,
-      email,
-      password: hashedPassword,
-      birthDate,
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
-    await newUser.save();
-
-    res.json({ message: "Регистрацията е успешна!" });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Грешка при регистрация" });
+    console.error('❌ Mongo connect error:', err.message);
+    process.exit(1);
   }
-});
+}
 
-// Вход
-app.post("/login", async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email });
-
-    if (!user) {
-      return res.status(400).json({ error: "Невалиден имейл или парола" });
-    }
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ error: "Невалиден имейл или парола" });
-    }
-
-    const token = jwt.sign({ userId: user._id }, "SECRET_KEY", {
-      expiresIn: "1d",
-    });
-
-    res.json({ message: "Успешен вход", token });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Грешка при вход" });
-  }
-});
-
-// Стартиране на сървъра
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+start();
