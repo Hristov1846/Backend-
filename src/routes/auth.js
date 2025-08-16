@@ -1,73 +1,92 @@
-const express = require('express');
+const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const { registerValidator, loginValidator } = require('../utils/validators');
 
-const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const JWT_EXPIRES_IN = '7d';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+
+// helper – прави ISO дата от "YYYY-MM-DD"
+function toISODate(str) {
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) throw new Error('Invalid date');
+  return d;
+}
 
 // POST /api/auth/register
-router.post('/register', registerValidator, async (req, res, next) => {
+// body: { name, email, password, birthDate: "YYYY-MM-DD", termsAccepted: true }
+router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, birthDate, termsAccepted } = req.body;
+    const { name, email, password, birthDate, termsAccepted } = req.body || {};
 
-    const exists = await User.findOne({ email });
-    if (exists) return res.status(409).json({ error: 'Email is already registered' });
+    if (!name || !email || !password || !birthDate)
+      return res.status(400).json({ error: 'Missing fields' });
 
-    const passwordHash = await bcrypt.hash(password, 12);
+    if (!termsAccepted)
+      return res.status(400).json({ error: 'Terms not accepted' });
+
+    if (password.length < 8)
+      return res.status(400).json({ error: 'Password too short' });
+
+    // възраст >= 16
+    const bd = toISODate(birthDate);
+    const now = new Date();
+    const age =
+      now.getFullYear() -
+      bd.getFullYear() -
+      (now < new Date(now.getFullYear(), bd.getMonth(), bd.getDate()) ? 1 : 0);
+    if (age < 16) return res.status(400).json({ error: 'Must be 16+ years old' });
+
+    const exists = await User.findOne({ email: email.toLowerCase() });
+    if (exists) return res.status(409).json({ error: 'Email already registered' });
+
+    const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await User.create({
       name,
-      email,
+      email: email.toLowerCase(),
       passwordHash,
-      birthDate: new Date(birthDate),
-      termsAccepted
+      birthDate: bd,
+      termsAccepted: true
     });
 
-    const token = jwt.sign({ uid: user._id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
+    const token = jwt.sign({ uid: user._id }, JWT_SECRET, { expiresIn: '7d' });
     res.status(201).json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        birthDate: user.birthDate,
-        createdAt: user.createdAt
-      },
+      ok: true,
+      user: { id: user._id, name: user.name, email: user.email },
       token
     });
   } catch (err) {
-    next(err);
+    // дублиран email
+    if (err && err.code === 11000) {
+      return res.status(409).json({ error: 'Email already registered' });
+    }
+    console.error('Register error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
 // POST /api/auth/login
-router.post('/login', loginValidator, async (req, res, next) => {
+// body: { email, password }
+router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'Missing fields' });
 
-    const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ error: 'Invalid email or password' });
+    const user = await User.findOne({ email: email.toLowerCase() });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) return res.status(401).json({ error: 'Invalid email or password' });
+    if (!ok) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const token = jwt.sign({ uid: user._id, email: user.email }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
-
+    const token = jwt.sign({ uid: user._id }, JWT_SECRET, { expiresIn: '7d' });
     res.json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        birthDate: user.birthDate,
-        createdAt: user.createdAt
-      },
+      ok: true,
+      user: { id: user._id, name: user.name, email: user.email },
       token
     });
   } catch (err) {
-    next(err);
+    console.error('Login error:', err);
+    res.status(500).json({ error: 'Server error' });
   }
 });
 
